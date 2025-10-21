@@ -29,6 +29,10 @@ var (
 	GroupName string = os.Getenv("GROUP_NAME")
 )
 
+const (
+	defaultTTL = 60
+)
+
 // ovhDNSProviderSolver implements the provider-specific logic needed to
 // 'present' an ACME challenge TXT record for your own DNS provider.
 // To do so, it must implement the `github.com/jetstack/cert-manager/pkg/acme/webhook.Solver`
@@ -331,6 +335,8 @@ func addTXTRecord(ovhClient *ovh.Client, domain, subDomain, target string) error
 		return err
 	}
 
+	getLogger().Info("Number of existing CNAME records found", "domain", domain, "subdomain", subDomain, "count", len(ids))
+
 	var cnameRecord *ovhZoneRecord
 	if len(ids) > 0 {
 		cnameRecord, err = getRecord(ovhClient, domain, ids[0])
@@ -338,15 +344,17 @@ func addTXTRecord(ovhClient *ovh.Client, domain, subDomain, target string) error
 			getLogger().Error("Failed to get existing CNAME record", "domain", domain, "subdomain", subDomain, "recordID", ids[0], "error", err)
 			return err
 		}
+		getLogger().Info("Existing CNAME record found, deleting it temporarily", "domain", domain, "subdomain", subDomain, "recordID", cnameRecord.Id)
 		err = deleteRecord(ovhClient, domain, cnameRecord.Id)
 		if err != nil {
 			getLogger().Error("Failed to delete CNAME record", "domain", domain, "subdomain", subDomain, "recordID", cnameRecord.Id, "error", err)
 			return err
 		}
+		getLogger().Info("CNAME record deleted temporarily", "domain", domain, "subdomain", subDomain, "recordID", cnameRecord.Id)
 	}
 	// END FORK
 
-	_, err = createRecord(ovhClient, domain, "TXT", subDomain, target)
+	_, err = createRecord(ovhClient, domain, "TXT", subDomain, target, defaultTTL)
 	if err != nil {
 		getLogger().Error("Failed to create TXT record", "domain", domain, "subdomain", subDomain, "error", err)
 		return err
@@ -354,11 +362,13 @@ func addTXTRecord(ovhClient *ovh.Client, domain, subDomain, target string) error
 
 	// START FORK : Recreate CNAME Record
 	if len(ids) > 0 {
-		_, err = createRecord(ovhClient, domain, "CNAME", cnameRecord.SubDomain, cnameRecord.Target)
+		getLogger().Info("Recreating previously deleted CNAME record", "domain", domain, "subdomain", subDomain)
+		_, err = createRecord(ovhClient, domain, "CNAME", cnameRecord.SubDomain, cnameRecord.Target, 3600)
 		if err != nil {
 			getLogger().Error("Failed to create CNAME record", "domain", domain, "subdomain", subDomain, "error", err)
 			return err
 		}
+		getLogger().Info("CNAME record recreated", "domain", domain, "subdomain", subDomain)
 	}
 	// END FORK
 
@@ -444,13 +454,13 @@ func deleteRecord(ovhClient *ovh.Client, domain string, id int64) error {
 	return nil
 }
 
-func createRecord(ovhClient *ovh.Client, domain, fieldType, subDomain, target string) (*ovhZoneRecord, error) {
+func createRecord(ovhClient *ovh.Client, domain, fieldType, subDomain, target string, TTL int) (*ovhZoneRecord, error) {
 	url := "/domain/zone/" + domain + "/record"
 	params := ovhZoneRecord{
 		FieldType: fieldType,
 		SubDomain: subDomain,
 		Target:    target,
-		TTL:       60,
+		TTL:       TTL,
 	}
 	record := ovhZoneRecord{}
 	err := ovhClient.Post(url, &params, &record)
