@@ -324,11 +324,44 @@ func addTXTRecord(ovhClient *ovh.Client, domain, subDomain, target string) error
 		return err
 	}
 
+	// START FORK : In order to create a new TXT record, we first need to remove any existing matching CNAME records
+	ids, err := listRecords(ovhClient, domain, "CNAME", subDomain)
+	if err != nil {
+		getLogger().Error("Failed to list CNAME records", "domain", domain, "subdomain", subDomain, "error", err)
+		return err
+	}
+
+	var cnameRecord *ovhZoneRecord
+	if len(ids) > 0 {
+		cnameRecord, err = getRecord(ovhClient, domain, ids[0])
+		if err != nil {
+			getLogger().Error("Failed to get existing CNAME record", "domain", domain, "subdomain", subDomain, "recordID", ids[0], "error", err)
+			return err
+		}
+		err = deleteRecord(ovhClient, domain, cnameRecord.Id)
+		if err != nil {
+			getLogger().Error("Failed to delete CNAME record", "domain", domain, "subdomain", subDomain, "recordID", id, "error", err)
+			return err
+		}
+	}
+	// END FORK
+
 	_, err = createRecord(ovhClient, domain, "TXT", subDomain, target)
 	if err != nil {
 		getLogger().Error("Failed to create TXT record", "domain", domain, "subdomain", subDomain, "error", err)
 		return err
 	}
+
+	// START FORK : Recreate CNAME Record
+	if len(ids) > 0 {
+		_, err = createRecord(ovhClient, domain, "CNAME", cnameRecord.SubDomain, cnameRecord.Target)
+		if err != nil {
+			getLogger().Error("Failed to create CNAME record", "domain", domain, "subdomain", subDomain, "error", err)
+			return err
+		}
+	}
+	// END FORK
+
 	return refreshRecords(ovhClient, domain)
 }
 
