@@ -340,7 +340,7 @@ func addTXTRecord(ovhClient *ovh.Client, domain, subDomain, target string) error
 		}
 		err = deleteRecord(ovhClient, domain, cnameRecord.Id)
 		if err != nil {
-			getLogger().Error("Failed to delete CNAME record", "domain", domain, "subdomain", subDomain, "recordID", id, "error", err)
+			getLogger().Error("Failed to delete CNAME record", "domain", domain, "subdomain", subDomain, "recordID", cnameRecord.Id, "error", err)
 			return err
 		}
 	}
